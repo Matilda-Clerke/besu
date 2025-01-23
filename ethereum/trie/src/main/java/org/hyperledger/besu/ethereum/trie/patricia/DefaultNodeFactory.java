@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -33,6 +35,7 @@ public class DefaultNodeFactory<V> implements NodeFactory<V> {
   private static final int NB_CHILD = 16;
 
   private final Function<V, Bytes> valueSerializer;
+  private final ExecutorService executorService = Executors.newCachedThreadPool();
 
   public DefaultNodeFactory(final Function<V, Bytes> valueSerializer) {
     this.valueSerializer = valueSerializer;
@@ -68,7 +71,7 @@ public class DefaultNodeFactory<V> implements NodeFactory<V> {
 
   @Override
   public Node<V> createBranch(final List<Node<V>> children, final Optional<V> value) {
-    return new BranchNode<>(children, value, this, valueSerializer);
+    return new BranchNode<>(children, value, this, valueSerializer, executorService);
   }
 
   @Override

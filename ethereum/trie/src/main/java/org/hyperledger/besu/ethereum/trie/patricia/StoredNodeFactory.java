@@ -31,6 +31,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -46,6 +48,7 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
   private final NodeLoader nodeLoader;
   private final Function<V, Bytes> valueSerializer;
   private final Function<Bytes, V> valueDeserializer;
+  private final ExecutorService executorService = Executors.newCachedThreadPool();
 
   public StoredNodeFactory(
       final NodeLoader nodeLoader,
@@ -87,7 +90,7 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
 
   @Override
   public Node<V> createBranch(final List<Node<V>> children, final Optional<V> value) {
-    return handleNewNode(new BranchNode<>(children, value, this, valueSerializer));
+    return handleNewNode(new BranchNode<>(children, value, this, valueSerializer, executorService));
   }
 
   @Override
@@ -221,7 +224,7 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
       value = Optional.of(decodeValue(nodeRLPs, errMessage));
     }
 
-    return new BranchNode<>(location, children, value, this, valueSerializer);
+    return new BranchNode<>(location, children, value, this, valueSerializer, executorService);
   }
 
   protected LeafNode<V> decodeLeaf(

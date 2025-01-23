@@ -32,6 +32,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -48,6 +52,8 @@ public class BranchNode<V> implements Node<V> {
   private final Optional<V> value;
   protected final NodeFactory<V> nodeFactory;
   private final Function<V, Bytes> valueSerializer;
+  private final ExecutorService executorService;
+
   protected WeakReference<Bytes> encodedBytes;
   private SoftReference<Bytes32> hash;
   private boolean dirty = false;
@@ -58,26 +64,30 @@ public class BranchNode<V> implements Node<V> {
       final List<Node<V>> children,
       final Optional<V> value,
       final NodeFactory<V> nodeFactory,
-      final Function<V, Bytes> valueSerializer) {
+      final Function<V, Bytes> valueSerializer,
+      final ExecutorService executorService) {
     assert (children.size() == maxChild());
     this.location = Optional.ofNullable(location);
     this.children = children;
     this.value = value;
     this.nodeFactory = nodeFactory;
     this.valueSerializer = valueSerializer;
+    this.executorService = executorService;
   }
 
   public BranchNode(
       final List<Node<V>> children,
       final Optional<V> value,
       final NodeFactory<V> nodeFactory,
-      final Function<V, Bytes> valueSerializer) {
+      final Function<V, Bytes> valueSerializer,
+      final ExecutorService executorService) {
     assert (children.size() == maxChild());
     this.location = Optional.empty();
     this.children = children;
     this.value = value;
     this.nodeFactory = nodeFactory;
     this.valueSerializer = valueSerializer;
+    this.executorService = executorService;
   }
 
   @Override
@@ -127,20 +137,30 @@ public class BranchNode<V> implements Node<V> {
         return encoded;
       }
     }
-    final BytesValueRLPOutput out = new BytesValueRLPOutput();
-    out.startList();
-    for (int i = 0; i < maxChild(); ++i) {
-      out.writeRaw(children.get(i).getEncodedBytesRef());
+
+    List<Future<Bytes>> childEncodedBytes =
+        children.stream()
+            .map((n) -> executorService.submit((() -> n.getEncodedBytesRef())))
+            .toList();
+    Future<Bytes> serialisedValue =
+        value
+            .map((v) -> executorService.submit(() -> valueSerializer.apply(v)))
+            .orElse(CompletableFuture.completedFuture(Bytes.EMPTY));
+
+    try {
+      final BytesValueRLPOutput out = new BytesValueRLPOutput();
+      out.startList();
+      for (int i = 0; i < maxChild(); ++i) {
+        out.writeRaw(childEncodedBytes.get(i).get());
+      }
+      out.writeBytes(serialisedValue.get());
+      out.endList();
+      final Bytes encoded = out.encoded();
+      encodedBytes = new WeakReference<>(encoded);
+      return encoded;
+    } catch (InterruptedException | ExecutionException e) {
+      throw new RuntimeException("Unexpected exception calculating encoded bytes", e);
     }
-    if (value.isPresent()) {
-      out.writeBytes(valueSerializer.apply(value.get()));
-    } else {
-      out.writeNull();
-    }
-    out.endList();
-    final Bytes encoded = out.encoded();
-    encodedBytes = new WeakReference<>(encoded);
-    return encoded;
   }
 
   @Override
