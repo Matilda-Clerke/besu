@@ -15,7 +15,6 @@
 package org.hyperledger.besu.ethereum.eth.sync.fullsync;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryBlockchain;
 
 import org.hyperledger.besu.ethereum.ProtocolContext;
@@ -258,18 +257,10 @@ public class FullSyncChainDownloaderTest {
     assertThat(localBlockchain.getChainHeadBlockNumber())
         .isGreaterThan(BlockHeader.GENESIS_BLOCK_NUMBER);
 
-    final RespondingEthPeer peer =
-        EthProtocolManagerTestUtil.createPeer(ethProtocolManager, otherBlockchain);
-    final RespondingEthPeer.Responder responder =
-        RespondingEthPeer.blockchainResponder(otherBlockchain);
+    EthProtocolManagerTestUtil.createPeer(ethProtocolManager, otherBlockchain);
 
     final ChainDownloader downloader = downloader();
     downloader.start();
-
-    peer.respond(responder);
-    assertThat(syncState.syncTarget()).isNotPresent();
-
-    peer.respondWhileOtherThreadsWork(responder, peer::hasOutstandingRequests);
 
     assertThat(syncState.syncTarget()).isNotPresent();
   }
@@ -320,20 +311,13 @@ public class FullSyncChainDownloaderTest {
     setupTest(storageFormat);
     final Difficulty localTd = localBlockchain.getChainHead().getTotalDifficulty();
 
-    final RespondingEthPeer.Responder responder =
-        RespondingEthPeer.blockchainResponder(otherBlockchain);
-    final RespondingEthPeer peerA =
-        EthProtocolManagerTestUtil.createPeer(ethProtocolManager, localTd.add(100));
+    EthProtocolManagerTestUtil.createPeer(ethProtocolManager, localTd.add(100));
     final RespondingEthPeer peerB =
         EthProtocolManagerTestUtil.createPeer(ethProtocolManager, localTd.add(200));
 
     final ChainDownloader downloader = downloader();
     downloader.start();
 
-    // Process until the sync target is selected
-    while (!syncState.syncTarget().isPresent()) {
-      RespondingEthPeer.respondOnce(responder, peerA, peerB);
-    }
     assertThat(syncState.syncTarget()).isPresent();
     assertThat(syncState.syncTarget().get().peer()).isEqualTo(peerB.getEthPeer());
   }
@@ -344,20 +328,13 @@ public class FullSyncChainDownloaderTest {
     setupTest(storageFormat);
     final Difficulty localTd = localBlockchain.getChainHead().getTotalDifficulty();
 
-    final RespondingEthPeer.Responder responder =
-        RespondingEthPeer.blockchainResponder(otherBlockchain);
-    final RespondingEthPeer peerA =
-        EthProtocolManagerTestUtil.createPeer(ethProtocolManager, localTd.add(100), 100);
+    EthProtocolManagerTestUtil.createPeer(ethProtocolManager, localTd.add(100), 100);
     final RespondingEthPeer peerB =
         EthProtocolManagerTestUtil.createPeer(ethProtocolManager, localTd.add(200), 50);
 
     final ChainDownloader downloader = downloader();
     downloader.start();
 
-    // Process until the sync target is selected
-    while (!syncState.syncTarget().isPresent()) {
-      RespondingEthPeer.respondOnce(responder, peerA, peerB);
-    }
     assertThat(syncState.syncTarget()).isPresent();
     assertThat(syncState.syncTarget().get().peer()).isEqualTo(peerB.getEthPeer());
   }
@@ -380,16 +357,12 @@ public class FullSyncChainDownloaderTest {
     final long bestPeerChainHead = otherBlockchain.getChainHeadBlockNumber();
     final RespondingEthPeer bestPeer =
         EthProtocolManagerTestUtil.createPeer(ethProtocolManager, otherBlockchain);
-    final RespondingEthPeer.Responder bestResponder =
-        RespondingEthPeer.blockchainResponder(otherBlockchain);
 
     // Create some other peers that are available to sync from
     final int otherPeersCount = 5;
     final List<RespondingEthPeer> otherPeers = new ArrayList<>(otherPeersCount);
     final long otherChainhead = bestPeerChainHead - 3;
     final Blockchain shorterChain = createShortChain(otherBlockchain, otherChainhead);
-    final RespondingEthPeer.Responder otherResponder =
-        RespondingEthPeer.blockchainResponder(shorterChain);
     for (int i = 0; i < otherPeersCount; i++) {
       final RespondingEthPeer otherPeer =
           EthProtocolManagerTestUtil.createPeer(ethProtocolManager, shorterChain);
@@ -397,18 +370,6 @@ public class FullSyncChainDownloaderTest {
     }
 
     downloader.start();
-
-    // Process through sync target selection
-    await()
-        .atMost(10, TimeUnit.SECONDS)
-        .untilAsserted(
-            () -> {
-              bestPeer.respond(bestResponder);
-              assertThat(syncState.syncTarget()).isNotEmpty();
-            });
-
-    assertThat(syncState.syncTarget()).isPresent();
-    assertThat(syncState.syncTarget().get().peer()).isEqualTo(bestPeer.getEthPeer());
 
     while (localBlockchain.getChainHeadBlockNumber() < bestPeerChainHead) {
       // Wait until there is a request to respond to (or we reached chain head).
@@ -432,11 +393,6 @@ public class FullSyncChainDownloaderTest {
               .filter(m -> m.skip() > 0)
               .count();
       assertThat(checkpointRequestsToOtherPeers).isEqualTo(0L);
-
-      bestPeer.respond(bestResponder);
-      for (final RespondingEthPeer otherPeer : otherPeers) {
-        otherPeer.respond(otherResponder);
-      }
     }
   }
 
