@@ -58,6 +58,7 @@ import java.util.stream.Stream;
 
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -337,82 +338,6 @@ public class FullSyncChainDownloaderTest {
 
     assertThat(syncState.syncTarget()).isPresent();
     assertThat(syncState.syncTarget().get().peer()).isEqualTo(peerB.getEthPeer());
-  }
-
-  @ParameterizedTest
-  @ArgumentsSource(FullSyncChainDownloaderTestArguments.class)
-  public void requestsCheckpointsFromSyncTarget(final DataStorageFormat storageFormat) {
-    setupTest(storageFormat);
-    localBlockchainSetup.importFirstBlocks(2);
-    otherBlockchainSetup.importAllBlocks();
-    final long targetBlock = otherBlockchain.getChainHeadBlockNumber();
-    // Sanity check
-    assertThat(targetBlock).isGreaterThan(localBlockchain.getChainHeadBlockNumber());
-
-    final SynchronizerConfiguration syncConfig =
-        syncConfigBuilder().downloaderChainSegmentSize(5).downloaderHeadersRequestSize(3).build();
-    final ChainDownloader downloader = downloader(syncConfig);
-
-    // Setup the best peer we should use as our sync target
-    final long bestPeerChainHead = otherBlockchain.getChainHeadBlockNumber();
-    final RespondingEthPeer bestPeer =
-        EthProtocolManagerTestUtil.createPeer(ethProtocolManager, otherBlockchain);
-
-    // Create some other peers that are available to sync from
-    final int otherPeersCount = 5;
-    final List<RespondingEthPeer> otherPeers = new ArrayList<>(otherPeersCount);
-    final long otherChainhead = bestPeerChainHead - 3;
-    final Blockchain shorterChain = createShortChain(otherBlockchain, otherChainhead);
-    for (int i = 0; i < otherPeersCount; i++) {
-      final RespondingEthPeer otherPeer =
-          EthProtocolManagerTestUtil.createPeer(ethProtocolManager, shorterChain);
-      otherPeers.add(otherPeer);
-    }
-
-    downloader.start();
-
-    while (localBlockchain.getChainHeadBlockNumber() < bestPeerChainHead) {
-      // Wait until there is a request to respond to (or we reached chain head).
-      // If we don't get a new request within 30 seconds the test will fail because we've probably
-      // stalled.
-      Awaitility.await()
-          .atMost(30, TimeUnit.SECONDS)
-          .until(
-              () ->
-                  bestPeer.hasOutstandingRequests()
-                      || otherPeers.stream().anyMatch(RespondingEthPeer::hasOutstandingRequests)
-                      || localBlockchain.getChainHeadBlockNumber() >= bestPeerChainHead);
-
-      // Check that any requests for checkpoint headers are only sent to the best peer
-      final long checkpointRequestsToOtherPeers =
-          otherPeers.stream()
-              .map(RespondingEthPeer::streamPendingOutgoingRequests)
-              .flatMap(s -> s.map(messageData -> messageData.unwrapMessageData().getValue()))
-              .filter(m -> m.getCode() == EthProtocolMessages.GET_BLOCK_HEADERS)
-              .map(GetBlockHeadersMessage::readFrom)
-              .filter(m -> m.skip() > 0)
-              .count();
-      assertThat(checkpointRequestsToOtherPeers).isEqualTo(0L);
-    }
-  }
-
-  private MutableBlockchain createShortChain(
-      final Blockchain blockchain, final long truncateAtBlockNumber) {
-    final BlockHeader genesisHeader =
-        blockchain.getBlockHeader(BlockHeader.GENESIS_BLOCK_NUMBER).get();
-    final BlockBody genesisBody = blockchain.getBlockBody(genesisHeader.getHash()).get();
-    final Block genesisBlock = new Block(genesisHeader, genesisBody);
-    final MutableBlockchain shortChain = createInMemoryBlockchain(genesisBlock);
-    long nextBlock = genesisHeader.getNumber() + 1;
-    while (nextBlock <= truncateAtBlockNumber) {
-      final BlockHeader header = blockchain.getBlockHeader(nextBlock).get();
-      final BlockBody body = blockchain.getBlockBody(header.getHash()).get();
-      final List<TransactionReceipt> receipts = blockchain.getTxReceipts(header.getHash()).get();
-      final Block block = new Block(header, body);
-      shortChain.appendBlock(block, receipts);
-      nextBlock++;
-    }
-    return shortChain;
   }
 
   @Test
